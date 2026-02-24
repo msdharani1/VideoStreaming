@@ -84,6 +84,37 @@ upsert_env_value() {
   fi
 }
 
+trim_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s\n' "$value"
+}
+
+add_csv_value() {
+  local csv="$1"
+  local value="$2"
+  [ -z "$value" ] && { printf '%s\n' "$csv"; return; }
+  case ",$csv," in
+    *,"$value",*) printf '%s\n' "$csv" ;;
+    *)
+      if [ -n "$csv" ]; then
+        printf '%s,%s\n' "$csv" "$value"
+      else
+        printf '%s\n' "$value"
+      fi
+      ;;
+  esac
+}
+
+extract_host() {
+  local value="$1"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  printf '%s\n' "$value"
+}
+
 escape_sed_replacement() {
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
@@ -205,6 +236,7 @@ BACKEND_PORT="${PORT:-$(read_env_value "$BACKEND_ENV" "PORT" "5000")}"
 BACKEND_HOST="${HOST:-$(read_env_value "$BACKEND_ENV" "HOST" "0.0.0.0")}"
 NGINX_PORT="${NGINX_PORT:-8080}"
 LAN_IP="${LAN_IP_OVERRIDE:-$(get_lan_ip)}"
+PUBLIC_HOSTS_RAW="${PUBLIC_HOSTS:-}"
 
 if [ "$BACKEND_PORT" = "$NGINX_PORT" ]; then
   fail "Backend and Nginx ports must be different. Set PORT and NGINX_PORT."
@@ -230,13 +262,32 @@ if [ "$ENABLE_CLOUDFLARE" = "1" ]; then
   [ -n "$CLOUDFLARE_PUBLIC_URL" ] || fail "Could not read Cloudflare URL. Check $CLOUDFLARED_LOG_FILE"
 fi
 
-CORS_ORIGINS="http://localhost:${NGINX_PORT},http://127.0.0.1:${NGINX_PORT},http://${LAN_IP}:${NGINX_PORT}"
+CORS_ORIGINS=""
+CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "http://localhost:${NGINX_PORT}")"
+CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "http://127.0.0.1:${NGINX_PORT}")"
+CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "http://${LAN_IP}:${NGINX_PORT}")"
+
+if [ -n "$PUBLIC_HOSTS_RAW" ]; then
+  IFS=',' read -r -a public_hosts <<<"$PUBLIC_HOSTS_RAW"
+  for item in "${public_hosts[@]}"; do
+    host="$(trim_value "$item")"
+    [ -z "$host" ] && continue
+    host="$(extract_host "$host")"
+    [ -z "$host" ] && continue
+    CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "http://${host}")"
+    CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "https://${host}")"
+    CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "http://${host}:${NGINX_PORT}")"
+    CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "https://${host}:${NGINX_PORT}")"
+  done
+fi
+
 if [ -n "$CLOUDFLARE_PUBLIC_URL" ]; then
-  CORS_ORIGINS="${CORS_ORIGINS},${CLOUDFLARE_PUBLIC_URL}"
+  CORS_ORIGINS="$(add_csv_value "$CORS_ORIGINS" "$CLOUDFLARE_PUBLIC_URL")"
 fi
 upsert_env_value "$BACKEND_ENV" "HOST" "$BACKEND_HOST"
 upsert_env_value "$BACKEND_ENV" "PORT" "$BACKEND_PORT"
 upsert_env_value "$BACKEND_ENV" "CORS_ORIGINS" "$CORS_ORIGINS"
+upsert_env_value "$BACKEND_ENV" "PUBLIC_HOSTS" "$PUBLIC_HOSTS_RAW"
 
 upsert_env_value "$FRONTEND_ENV" "VITE_API_BASE_URL" "/api"
 if [ -n "$CLOUDFLARE_PUBLIC_URL" ]; then

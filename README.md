@@ -116,6 +116,7 @@ It now runs a full ngrok preview setup:
 Optional overrides:
 - `LAN_IP_OVERRIDE=<your-ip> ./run-dev.sh`
 - `SKIP_INSTALL=1 ./run-dev.sh` (skip `npm install` check)
+- `PUBLIC_HOSTS=89.167.93.234,static.234.93.167.89.clients.your-server.de ./run-dev.sh` (allow public host/IP CORS + Vite host)
 
 ### Run with Cloudflare Tunnel (alternate HTTPS flow)
 
@@ -157,6 +158,7 @@ Optional overrides:
 - `PORT=5600 NGINX_PORT=8080 ./run-dev-nginx.sh`
 - `SKIP_INSTALL=1 ./run-dev-nginx.sh`
 - `ENABLE_CLOUDFLARE=0 ./run-dev-nginx.sh` (disable tunnel and run local/LAN only)
+- `PUBLIC_HOSTS=89.167.93.234,static.234.93.167.89.clients.your-server.de ./run-dev-nginx.sh` (adds public host/IP origins for backend CORS)
 
 ## API
 

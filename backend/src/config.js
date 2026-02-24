@@ -3,6 +3,29 @@ require('dotenv').config();
 
 const ROOT_DIR = path.resolve(__dirname, '../../');
 
+function normalizeOriginInput(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return [];
+  if (trimmed === '*') return ['*'];
+  if (/^https?:\/\//i.test(trimmed)) {
+    return [trimmed.replace(/\/+$/, '')];
+  }
+  const hostOnly = trimmed.replace(/^\/+|\/+$/g, '');
+  if (!hostOnly) return [];
+  return [`http://${hostOnly}`, `https://${hostOnly}`];
+}
+
+function parseOriginList(raw) {
+  if (!String(raw || '').trim()) {
+    return [];
+  }
+
+  return raw
+    .split(',')
+    .flatMap((value) => normalizeOriginInput(value))
+    .filter(Boolean);
+}
+
 function parseCorsOrigins() {
   const defaultLocalOrigins = [
     'http://localhost',
@@ -13,13 +36,15 @@ function parseCorsOrigins() {
     'http://127.0.0.1:8080'
   ];
 
-  const raw = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '';
-  if (!raw.trim()) {
-    return defaultLocalOrigins;
+  const configuredOrigins = parseOriginList(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '');
+  const publicHostOrigins = parseOriginList(process.env.PUBLIC_HOSTS || '');
+  const combined = [...configuredOrigins, ...publicHostOrigins, ...defaultLocalOrigins];
+
+  if (combined.includes('*')) {
+    return ['*'];
   }
 
-  const configuredOrigins = raw.split(',').map((value) => value.trim()).filter(Boolean);
-  return [...new Set([...configuredOrigins, ...defaultLocalOrigins])];
+  return [...new Set(combined)];
 }
 
 module.exports = {
