@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { deleteVideoById, listVideos, uploadVideo } from '../api';
+import { deleteVideoById, generateTimelineForVideo, listVideos, syncVideoDuration, updateVideoTitle, uploadVideo } from '../api';
+import { useAuth } from '../context/AuthContext';
 
 function formatSize(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return 'Unknown size';
@@ -15,6 +16,16 @@ function formatCreatedAt(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (!total) return 'Duration unavailable';
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function statusLabel(status) {
@@ -53,7 +64,14 @@ const RefreshIcon = () => (
   </svg>
 );
 
+const TimelineIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8m-8 5h6m-6 5h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" />
+  </svg>
+);
+
 function UploadPage() {
+  const { token } = useAuth();
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -63,6 +81,11 @@ function UploadPage() {
   const [error, setError] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [deletingId, setDeletingId] = useState('');
+  const [editingId, setEditingId] = useState('');
+  const [editingTitle, setEditingTitle] = useState('');
+  const [savingTitle, setSavingTitle] = useState(false);
+  const [generatingTimelineId, setGeneratingTimelineId] = useState('');
+  const [syncingDurationId, setSyncingDurationId] = useState('');
   const [thumbErrors, setThumbErrors] = useState({});
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
@@ -89,7 +112,7 @@ function UploadPage() {
       setLoadingVideos(false);
       setRefreshingVideos(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     fetchVideos();
@@ -106,7 +129,7 @@ function UploadPage() {
     setUploading(true);
     setError('');
     try {
-      await uploadVideo({ file, title: title.trim() });
+      await uploadVideo({ file, title: title.trim(), token });
       setTitle('');
       setFile(null);
       await fetchVideos(true);
@@ -124,12 +147,59 @@ function UploadPage() {
     setDeletingId(videoId);
     setDeleteError('');
     try {
-      await deleteVideoById(videoId);
+      await deleteVideoById(videoId, token);
       await fetchVideos(true);
     } catch (requestError) {
       setDeleteError(requestError.message || 'Could not delete video');
     } finally {
       setDeletingId('');
+    }
+  }
+
+  async function onSaveTitle(videoId) {
+    const nextTitle = editingTitle.trim();
+    if (!nextTitle) {
+      setDeleteError('Title is required');
+      return;
+    }
+
+    setSavingTitle(true);
+    setDeleteError('');
+    try {
+      await updateVideoTitle(videoId, nextTitle, token);
+      setEditingId('');
+      setEditingTitle('');
+      await fetchVideos(true);
+    } catch (requestError) {
+      setDeleteError(requestError.message || 'Could not update title');
+    } finally {
+      setSavingTitle(false);
+    }
+  }
+
+  async function onGenerateTimeline(videoId) {
+    setGeneratingTimelineId(videoId);
+    setDeleteError('');
+    try {
+      await generateTimelineForVideo(videoId, token);
+      await fetchVideos(true);
+    } catch (requestError) {
+      setDeleteError(requestError.message || 'Could not start timeline generation');
+    } finally {
+      setGeneratingTimelineId('');
+    }
+  }
+
+  async function onSyncDuration(videoId) {
+    setSyncingDurationId(videoId);
+    setDeleteError('');
+    try {
+      await syncVideoDuration(videoId, token);
+      await fetchVideos(true);
+    } catch (requestError) {
+      setDeleteError(requestError.message || 'Could not fetch duration');
+    } finally {
+      setSyncingDurationId('');
     }
   }
 
@@ -155,9 +225,9 @@ function UploadPage() {
           <div className="absolute -bottom-20 -left-20 w-48 h-48 bg-blue/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative z-10">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-accent mb-2">Upload & Transcode</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-accent mb-2">Admin Control Panel</p>
             <h1 className="text-3xl md:text-4xl font-black text-text-primary mb-3">
-              Video Processing Pipeline
+              Upload and Manage Videos
             </h1>
             <p className="text-text-secondary max-w-2xl text-base leading-relaxed">
               Upload your videos and automatically transcode to <span className="text-accent font-semibold">360p</span>,{' '}
@@ -369,6 +439,8 @@ function UploadPage() {
               const isProcessing = video.status === 'processing';
               const isReady = video.status === 'ready';
               const isFailed = video.status === 'failed';
+              const isTimelineReady = Boolean(video.timeline?.available);
+              const isTimelineGenerating = Boolean(video.timeline?.generating) || generatingTimelineId === video.id;
 
               return (
                 <article
@@ -412,9 +484,39 @@ function UploadPage() {
                     <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between gap-3">
                       <div className="space-y-1">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="font-bold text-text-primary text-base leading-snug line-clamp-2">
-                            {video.title || 'Untitled Video'}
-                          </h3>
+                          <div className="flex-1 min-w-0">
+                            {editingId === video.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  value={editingTitle}
+                                  onChange={(event) => setEditingTitle(event.target.value)}
+                                  className="w-full bg-bg-secondary border border-border rounded-lg px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => onSaveTitle(video.id)}
+                                  disabled={savingTitle}
+                                  className="px-2 py-1 text-xs rounded bg-accent text-white disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingId('');
+                                    setEditingTitle('');
+                                  }}
+                                  className="px-2 py-1 text-xs rounded bg-white/10 text-text-secondary"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <h3 className="font-bold text-text-primary text-base leading-snug line-clamp-2">
+                                {video.title || 'Untitled Video'}
+                              </h3>
+                            )}
+                          </div>
                           <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isReady ? 'bg-green/15 text-green' :
                               isProcessing ? 'bg-blue/15 text-blue' :
                                 'bg-red/15 text-red'
@@ -423,8 +525,18 @@ function UploadPage() {
                           </span>
                         </div>
                         <p className="text-xs text-text-muted">{video.originalName || 'Unknown source'}</p>
+                        <p className="text-xs text-text-muted">Duration: {formatDuration(video.durationSec)}</p>
                         <p className="text-xs text-text-muted/70 font-mono">{video.id}</p>
                         <p className="text-xs text-text-muted">{formatCreatedAt(video.createdAt)}</p>
+                        {isReady ? (
+                          <p className={`text-xs font-semibold ${isTimelineReady ? 'text-green' : isTimelineGenerating ? 'text-blue' : 'text-text-muted'}`}>
+                            {isTimelineReady
+                              ? `Timeline ready (${video.timeline?.frameCount || 0} frames)`
+                              : isTimelineGenerating
+                                ? 'Timeline generation running...'
+                                : 'Timeline not generated'}
+                          </p>
+                        ) : null}
                       </div>
 
                       {/* Progress bar for processing */}
@@ -465,6 +577,37 @@ function UploadPage() {
                             View Progress
                           </Link>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(video.id);
+                            setEditingTitle(video.title || '');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue/10 hover:bg-blue/20 text-blue text-sm font-semibold rounded-lg transition-all duration-200 border-none cursor-pointer"
+                        >
+                          Edit
+                        </button>
+                        {isReady ? (
+                          <button
+                            type="button"
+                            onClick={() => onGenerateTimeline(video.id)}
+                            disabled={isTimelineGenerating}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 text-text-secondary text-sm font-semibold rounded-lg transition-all duration-200 disabled:opacity-40 border-none cursor-pointer"
+                          >
+                            <TimelineIcon />
+                            {isTimelineGenerating ? 'Generating...' : isTimelineReady ? 'Regenerate Timeline' : 'Generate Timeline'}
+                          </button>
+                        ) : null}
+                        {isReady ? (
+                          <button
+                            type="button"
+                            onClick={() => onSyncDuration(video.id)}
+                            disabled={syncingDurationId === video.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 text-text-secondary text-sm font-semibold rounded-lg transition-all duration-200 disabled:opacity-40 border-none cursor-pointer"
+                          >
+                            {syncingDurationId === video.id ? 'Getting Duration...' : video.durationSec > 0 ? 'Refresh Duration' : 'Get Duration'}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => onDelete(video.id)}

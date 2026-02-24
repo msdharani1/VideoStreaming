@@ -276,7 +276,108 @@ function transcodeToHls({ inputPath, outputDir, videoId, onProgress, onSpawn, sh
   });
 }
 
+function generateTimelineFrames({ inputPath, outputDir, videoId, onProgress, onSpawn, shouldCancel }) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      fs.mkdirSync(outputDir, { recursive: true });
+      const { durationSec } = await probeMedia(inputPath);
+      emitProgress(onProgress, 5, 'Preparing timeline extraction');
+
+      if (typeof shouldCancel === 'function' && shouldCancel()) {
+        return reject(new Error('timeline generation canceled'));
+      }
+
+      const ffmpegArgs = [
+        '-y',
+        '-i',
+        inputPath,
+        '-vf',
+        'fps=1,scale=320:-2',
+        '-q:v',
+        '4',
+        '-start_number',
+        '0',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        path.join(outputDir, 'frame_%06d.jpg')
+      ];
+
+      const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+      if (typeof onSpawn === 'function') {
+        onSpawn(ffmpeg);
+      }
+
+      let stdoutBuffer = '';
+      let cancelTimer = null;
+
+      if (typeof shouldCancel === 'function') {
+        cancelTimer = setInterval(() => {
+          if (shouldCancel() && !ffmpeg.killed) {
+            ffmpeg.kill('SIGTERM');
+          }
+        }, 300);
+      }
+
+      ffmpeg.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString();
+        const lines = stdoutBuffer.split('\n');
+        stdoutBuffer = lines.pop() || '';
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line || !line.includes('=')) {
+            continue;
+          }
+
+          const [key, value] = line.split('=');
+          if (key === 'out_time_ms' && durationSec > 0) {
+            const outTimeMs = Number(value);
+            if (Number.isFinite(outTimeMs) && outTimeMs >= 0) {
+              const ratio = Math.min(outTimeMs / (durationSec * 1000000), 1);
+              emitProgress(onProgress, 5 + ratio * 90, 'Extracting timeline frames');
+            }
+          }
+
+          if (key === 'progress' && value === 'end') {
+            emitProgress(onProgress, 100, 'Timeline ready');
+          }
+        }
+      });
+
+      ffmpeg.stderr.on('data', (chunk) => {
+        const message = chunk.toString().trim();
+        if (message) {
+          console.log(`[ffmpeg-timeline:${videoId}] ${message}`);
+        }
+      });
+
+      ffmpeg.on('error', (error) => reject(error));
+
+      ffmpeg.on('close', (code) => {
+        if (cancelTimer) {
+          clearInterval(cancelTimer);
+        }
+
+        if (code === 0) {
+          return resolve({ durationSec });
+        }
+
+        if (code === null) {
+          return reject(new Error('timeline ffmpeg terminated before completion'));
+        }
+
+        return reject(new Error(`timeline ffmpeg exited with code ${code}`));
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 module.exports = {
   transcodeToHls,
-  createRandomThumbnail
+  createRandomThumbnail,
+  generateTimelineFrames,
+  probeMedia
 };

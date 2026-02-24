@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const { HOST, PORT, CORS_ORIGINS, STORAGE_DIR } = require('./config');
 const { tokenAuth } = require('./middleware/tokenAuth');
+const authRoutes = require('./routes/authRoutes');
 const videoRoutes = require('./routes/videoRoutes');
 
 const app = express();
@@ -53,6 +54,7 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
+app.use(authRoutes);
 app.use(videoRoutes);
 app.use('/storage', tokenAuth, restrictStorageByToken, express.static(path.resolve(STORAGE_DIR)));
 

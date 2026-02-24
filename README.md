@@ -16,6 +16,10 @@ root/
 - React (Vite) frontend with upload and watch pages
 - Node.js + Express backend
 - SQLite metadata DB via `better-sqlite3`
+- Email/password login with role-based access
+  - `admin`: upload, edit title, delete
+  - `user`: browse and watch only
+  - `guest`: browse and watch only (no account)
 - FFmpeg HLS transcoding with:
   - 360p, 720p, 1080p renditions
   - 10-second segments
@@ -28,6 +32,8 @@ root/
 - Node.js 20+
 - npm 10+
 - FFmpeg and ffprobe installed and available in PATH
+- ngrok CLI installed and authenticated (`ngrok config add-authtoken <token>`)
+- cloudflared installed for Cloudflare Tunnel HTTPS (quick tunnel)
 
 ### FFmpeg install notes
 
@@ -55,6 +61,15 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
+4. Auth behavior:
+- Sign up and sign in are available from `/login`
+- "Continue as Guest" is available from `/login` for watch-only access
+- `msdharaniofficial@gmail.com` is always treated as `admin` (owner email)
+- Optional seeded defaults can be enabled with `SEED_DEFAULT_USERS=true` and configured via:
+  - `ADMIN_EMAIL`, `ADMIN_PASSWORD`
+  - `USER_EMAIL`, `USER_PASSWORD`
+  - `ADMIN_OWNER_EMAIL`
+
 ## Run
 
 ### Run backend + frontend together
@@ -65,6 +80,12 @@ npm run dev
 
 - Backend: `http://localhost:5000`
 - Frontend: `http://localhost:5173`
+- App routes:
+  - `/login`
+  - `/videos` (guest + user + admin)
+  - `/admin` (admin only)
+  - `/watch/:id` (guest + user + admin)
+  - `/process/:id` (admin only)
 
 ### Run separately
 
@@ -81,8 +102,35 @@ Use the root helper script:
 ./run-dev.sh
 ```
 
-It binds frontend/backend to LAN hosts, configures CORS for mobile access, and prints the phone URL (same Wi-Fi network).
-Default configured LAN IP: `10.134.161.97` (override with `LAN_IP_OVERRIDE` if needed).
+It now runs a full ngrok preview setup:
+- starts ngrok for the frontend
+- auto-updates `backend/.env` CORS origins (includes current ngrok URL)
+- auto-updates `frontend/.env` API/proxy/allowed-host settings
+- starts backend + frontend and prints:
+  - local frontend URL
+  - LAN frontend URL
+  - backend health URL
+  - ngrok preview URL (share this)
+
+Optional overrides:
+- `LAN_IP_OVERRIDE=<your-ip> ./run-dev.sh`
+- `SKIP_INSTALL=1 ./run-dev.sh` (skip `npm install` check)
+
+### Run with Cloudflare Tunnel (alternate HTTPS flow)
+
+Use:
+
+```bash
+./run-dev-cloudflare.sh
+```
+
+It starts backend + frontend on different ports, launches:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:<frontend-port>
+```
+
+Then it auto-updates backend/frontend env values, CORS, allowed hosts, and prints the Cloudflare HTTPS preview URL.
 
 ## API
 

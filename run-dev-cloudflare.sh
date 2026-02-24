@@ -9,14 +9,14 @@ BACKEND_ENV_EXAMPLE="$ROOT_DIR/backend/.env.example"
 FRONTEND_ENV="$ROOT_DIR/frontend/.env"
 FRONTEND_ENV_EXAMPLE="$ROOT_DIR/frontend/.env.example"
 LOG_DIR="$ROOT_DIR/.dev-logs"
-NGROK_LOG_FILE="$LOG_DIR/ngrok.log"
+CLOUDFLARED_LOG_FILE="$LOG_DIR/cloudflared.log"
 
 BACKEND_PID=""
 FRONTEND_PID=""
-NGROK_PID=""
+CLOUDFLARED_PID=""
 
 log() {
-  printf '[super-dev] %s\n' "$*"
+  printf '[super-dev-cf] %s\n' "$*"
 }
 
 fail() {
@@ -115,21 +115,19 @@ port_in_use() {
   return 1
 }
 
-wait_for_ngrok_url() {
-  local public_url
+wait_for_cloudflare_url() {
+  local public_url=""
 
-  for _ in {1..60}; do
-    if [ -f "$NGROK_LOG_FILE" ]; then
-      public_url="$(sed -n 's/.*url=\(https:\/\/[^ ]*\).*/\1/p' "$NGROK_LOG_FILE" | tail -n 1)"
-      public_url="${public_url%\"}"
-      public_url="${public_url#\"}"
+  for _ in {1..90}; do
+    if [ -f "$CLOUDFLARED_LOG_FILE" ]; then
+      public_url="$(grep -Eo 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$CLOUDFLARED_LOG_FILE" | tail -n 1 || true)"
       if [ -n "$public_url" ]; then
         printf '%s\n' "$public_url"
         return 0
       fi
     fi
 
-    if [ -n "$NGROK_PID" ] && ! kill -0 "$NGROK_PID" 2>/dev/null; then
+    if [ -n "$CLOUDFLARED_PID" ] && ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
       break
     fi
     sleep 1
@@ -168,7 +166,7 @@ cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
 
-  for pid in "$FRONTEND_PID" "$BACKEND_PID" "$NGROK_PID"; do
+  for pid in "$FRONTEND_PID" "$BACKEND_PID" "$CLOUDFLARED_PID"; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
     fi
@@ -181,8 +179,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 ensure_command npm
-ensure_command ngrok
 ensure_command curl
+ensure_command cloudflared
 
 mkdir -p "$LOG_DIR"
 ensure_env_file "$BACKEND_ENV" "$BACKEND_ENV_EXAMPLE"
@@ -194,6 +192,10 @@ BACKEND_HOST="${HOST:-$(read_env_value "$BACKEND_ENV" "HOST" "0.0.0.0")}"
 FRONTEND_HOST="${VITE_HOST:-$(read_env_value "$FRONTEND_ENV" "VITE_HOST" "0.0.0.0")}"
 LAN_IP="${LAN_IP_OVERRIDE:-$(get_lan_ip)}"
 
+if [ "$BACKEND_PORT" = "$FRONTEND_PORT" ]; then
+  fail "Backend and frontend ports must be different. Set PORT and VITE_PORT."
+fi
+
 if port_in_use "$BACKEND_PORT"; then
   fail "Port ${BACKEND_PORT} is already in use. Stop that process or run with PORT=<free-port>."
 fi
@@ -202,21 +204,20 @@ if port_in_use "$FRONTEND_PORT"; then
   fail "Port ${FRONTEND_PORT} is already in use. Stop that process or run with VITE_PORT=<free-port>."
 fi
 
-log "Starting ngrok tunnel for frontend port ${FRONTEND_PORT}..."
-rm -f "$NGROK_LOG_FILE"
-ngrok http \
-  --log=stdout \
-  --log-format=logfmt \
-  "${FRONTEND_PORT}" >"$NGROK_LOG_FILE" 2>&1 &
-NGROK_PID=$!
+log "Starting Cloudflare tunnel for frontend port ${FRONTEND_PORT}..."
+rm -f "$CLOUDFLARED_LOG_FILE"
+cloudflared tunnel \
+  --no-autoupdate \
+  --url "http://127.0.0.1:${FRONTEND_PORT}" >"$CLOUDFLARED_LOG_FILE" 2>&1 &
+CLOUDFLARED_PID=$!
 
-NGROK_PUBLIC_URL="$(wait_for_ngrok_url || true)"
-[ -n "$NGROK_PUBLIC_URL" ] || fail "Could not read ngrok public URL. Check $NGROK_LOG_FILE"
-NGROK_HOST="${NGROK_PUBLIC_URL#https://}"
-NGROK_HOST="${NGROK_HOST#http://}"
+CLOUDFLARE_PUBLIC_URL="$(wait_for_cloudflare_url || true)"
+[ -n "$CLOUDFLARE_PUBLIC_URL" ] || fail "Could not read Cloudflare URL. Check $CLOUDFLARED_LOG_FILE"
+CLOUDFLARE_HOST="${CLOUDFLARE_PUBLIC_URL#https://}"
+CLOUDFLARE_HOST="${CLOUDFLARE_HOST#http://}"
 
-CORS_ORIGINS="http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT},http://${LAN_IP}:${FRONTEND_PORT},${NGROK_PUBLIC_URL}"
-VITE_ALLOWED_HOSTS="${NGROK_HOST},localhost,127.0.0.1,${LAN_IP}"
+CORS_ORIGINS="http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT},http://${LAN_IP}:${FRONTEND_PORT},${CLOUDFLARE_PUBLIC_URL}"
+VITE_ALLOWED_HOSTS="${CLOUDFLARE_HOST},localhost,127.0.0.1,${LAN_IP}"
 
 upsert_env_value "$BACKEND_ENV" "HOST" "$BACKEND_HOST"
 upsert_env_value "$BACKEND_ENV" "PORT" "$BACKEND_PORT"
@@ -227,7 +228,7 @@ upsert_env_value "$FRONTEND_ENV" "VITE_PORT" "$FRONTEND_PORT"
 upsert_env_value "$FRONTEND_ENV" "VITE_API_BASE_URL" "/api"
 upsert_env_value "$FRONTEND_ENV" "VITE_API_PROXY_TARGET" "http://127.0.0.1:${BACKEND_PORT}"
 upsert_env_value "$FRONTEND_ENV" "VITE_ALLOWED_HOSTS" "$VITE_ALLOWED_HOSTS"
-upsert_env_value "$FRONTEND_ENV" "VITE_PUBLIC_PREVIEW_URL" "$NGROK_PUBLIC_URL"
+upsert_env_value "$FRONTEND_ENV" "VITE_PUBLIC_PREVIEW_URL" "$CLOUDFLARE_PUBLIC_URL"
 
 export HOST="$BACKEND_HOST"
 export PORT="$BACKEND_PORT"
@@ -264,16 +265,16 @@ log "Services are running:"
 echo "  Frontend local:      http://localhost:${FRONTEND_PORT}"
 echo "  Frontend LAN:        http://${LAN_IP}:${FRONTEND_PORT}"
 echo "  Backend local:       http://localhost:${BACKEND_PORT}"
-echo "  Ngrok preview:       ${NGROK_PUBLIC_URL}"
+echo "  Cloudflare preview:  ${CLOUDFLARE_PUBLIC_URL}"
 echo ""
 echo "  Logs:"
-echo "    ngrok:             ${LOG_DIR}/ngrok.log"
+echo "    cloudflared:       ${LOG_DIR}/cloudflared.log"
 echo "    backend:           ${LOG_DIR}/backend.log"
 echo "    frontend:          ${LOG_DIR}/frontend.log"
 echo ""
 
 set +e
-wait -n "$BACKEND_PID" "$FRONTEND_PID" "$NGROK_PID"
+wait -n "$BACKEND_PID" "$FRONTEND_PID" "$CLOUDFLARED_PID"
 child_exit_code=$?
 set -e
 
@@ -287,9 +288,9 @@ if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
   tail -n 40 "$LOG_DIR/frontend.log" || true
 fi
 
-if ! kill -0 "$NGROK_PID" 2>/dev/null; then
-  log "Ngrok process exited unexpectedly. Tail of ngrok log:"
-  tail -n 40 "$NGROK_LOG_FILE" || true
+if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+  log "Cloudflared process exited unexpectedly. Tail of cloudflared log:"
+  tail -n 40 "$CLOUDFLARED_LOG_FILE" || true
 fi
 
 exit "$child_exit_code"
