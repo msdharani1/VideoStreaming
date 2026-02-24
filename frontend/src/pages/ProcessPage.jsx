@@ -18,6 +18,7 @@ function ProcessPage() {
 
   const [state, setState] = useState({
     title: '',
+    playbackType: 'adaptive',
     status: 'processing',
     progress: 0,
     processStep: 'Initializing',
@@ -38,6 +39,7 @@ function ProcessPage() {
       const payload = await getUploadStatus(id);
       setState({
         title: payload.title || '',
+        playbackType: payload.playbackType || 'adaptive',
         status: payload.status,
         progress: Number(payload.progress) || 0,
         processStep: payload.processStep || 'Processing',
@@ -49,7 +51,8 @@ function ProcessPage() {
         stopPolling();
         if (!redirectScheduledRef.current) {
           redirectScheduledRef.current = true;
-          window.setTimeout(() => navigate(`/watch/${id}`), 1500);
+          const targetPath = (payload.playbackType || 'adaptive') === 'normal' ? `/watch-normal/${id}` : `/watch/${id}`;
+          window.setTimeout(() => navigate(targetPath), 1500);
         }
       }
       if (payload.status === 'failed') {
@@ -212,7 +215,7 @@ function ProcessPage() {
             {isReady ? (
               <button
                 type="button"
-                onClick={() => navigate(`/watch/${id}`)}
+                onClick={() => navigate(state.playbackType === 'normal' ? `/watch-normal/${id}` : `/watch/${id}`)}
                 className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-hover text-white font-bold rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-accent/20 border-none cursor-pointer"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">

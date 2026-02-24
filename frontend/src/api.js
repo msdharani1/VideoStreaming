@@ -68,8 +68,66 @@ export async function uploadVideo({ file, title, token }) {
   return parseJsonOrThrow(response);
 }
 
+export async function uploadNormalVideo({ file, title, token }) {
+  const formData = new FormData();
+  formData.append('video', file);
+  if (title) {
+    formData.append('title', title);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/upload/normal`, {
+    method: 'POST',
+    headers: {
+      ...buildAuthHeaders(token)
+    },
+    body: formData
+  });
+
+  return parseJsonOrThrow(response);
+}
+
+export async function listNormalImportFiles(token) {
+  const response = await fetch(`${API_BASE_URL}/upload/normal/import/files`, {
+    headers: {
+      ...buildAuthHeaders(token)
+    }
+  });
+  const payload = await parseJsonOrThrow(response);
+  return payload.files || [];
+}
+
+export async function importNormalVideoFromStorage({ fileName, title, token }) {
+  const response = await fetch(`${API_BASE_URL}/upload/normal/import`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildAuthHeaders(token)
+    },
+    body: JSON.stringify({ fileName, title })
+  });
+  return parseJsonOrThrow(response);
+}
+
 export async function getVideoStream(videoId) {
   const response = await fetch(`${API_BASE_URL}/video/${videoId}`);
+
+  if (response.status === 202) {
+    const payload = await response.json();
+    return {
+      statusCode: response.status,
+      payload
+    };
+  }
+
+  const payload = await parseJsonOrThrow(response);
+  return {
+    statusCode: response.status,
+    payload
+  };
+}
+
+export async function getNormalVideoStream(videoId) {
+  const response = await fetch(`${API_BASE_URL}/video/${videoId}/normal`);
 
   if (response.status === 202) {
     const payload = await response.json();

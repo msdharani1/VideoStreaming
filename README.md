@@ -22,7 +22,7 @@ root/
   - `guest`: browse and watch only (no account)
 - FFmpeg HLS transcoding with:
   - 360p, 720p, 1080p renditions
-  - 10-second segments
+  - configurable segment length (default 6 seconds)
   - generated `master.m3u8`
 - JWT-protected stream access (`5 minutes` token)
 - Background transcoding using `child_process.spawn` (non-blocking)
@@ -34,6 +34,7 @@ root/
 - FFmpeg and ffprobe installed and available in PATH
 - ngrok CLI installed and authenticated (`ngrok config add-authtoken <token>`)
 - cloudflared installed for Cloudflare Tunnel HTTPS (quick tunnel)
+- Nginx installed for local high-performance reverse proxy mode
 
 ### FFmpeg install notes
 
@@ -132,6 +133,31 @@ cloudflared tunnel --url http://127.0.0.1:<frontend-port>
 
 Then it auto-updates backend/frontend env values, CORS, allowed hosts, and prints the Cloudflare HTTPS preview URL.
 
+### Run with Nginx Accelerator (no cloud)
+
+Use:
+
+```bash
+./run-dev-nginx.sh
+```
+
+This mode:
+- builds frontend as static files
+- starts backend on `PORT` (from `backend/.env`)
+- starts Nginx on `NGINX_PORT` (default `8080`)
+- starts Cloudflare quick tunnel to Nginx and prints HTTPS preview URL
+- serves frontend directly from Nginx
+- proxies API/media through Nginx with caching tuned for:
+  - HLS segments (`.ts/.m4s/.mp4`): long cache
+  - thumbnails/timeline frames: medium cache
+  - playlists (`.m3u8`): no-cache
+
+Optional overrides:
+- `NGINX_PORT=8081 ./run-dev-nginx.sh`
+- `PORT=5600 NGINX_PORT=8080 ./run-dev-nginx.sh`
+- `SKIP_INSTALL=1 ./run-dev-nginx.sh`
+- `ENABLE_CLOUDFLARE=0 ./run-dev-nginx.sh` (disable tunnel and run local/LAN only)
+
 ## API
 
 ### `POST /upload`
@@ -227,3 +253,4 @@ Then it auto-updates backend/frontend env values, CORS, allowed hosts, and print
 - Supports large video uploads up to 10GB.
 - FFmpeg transcoder maps segment outputs directly to `360p`, `720p`, and `1080p` directories.
 - Automatically pads odd resolution dimensions to fix H.264 "height not divisible by 2" encoding errors.
+- HLS segment length is configurable via `HLS_SEGMENT_SECONDS` (`backend/.env`, default `6`).

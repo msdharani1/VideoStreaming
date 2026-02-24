@@ -4,12 +4,22 @@ require('dotenv').config();
 const ROOT_DIR = path.resolve(__dirname, '../../');
 
 function parseCorsOrigins() {
+  const defaultLocalOrigins = [
+    'http://localhost',
+    'http://127.0.0.1',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080'
+  ];
+
   const raw = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '';
   if (!raw.trim()) {
-    return ['http://localhost:5173', 'http://127.0.0.1:5173'];
+    return defaultLocalOrigins;
   }
 
-  return [...new Set(raw.split(',').map((value) => value.trim()).filter(Boolean))];
+  const configuredOrigins = raw.split(',').map((value) => value.trim()).filter(Boolean);
+  return [...new Set([...configuredOrigins, ...defaultLocalOrigins])];
 }
 
 module.exports = {
@@ -24,6 +34,7 @@ module.exports = {
   DEFAULT_USER_EMAIL: process.env.USER_EMAIL || 'user@primeview.local',
   DEFAULT_USER_PASSWORD: process.env.USER_PASSWORD || 'user123',
   SEED_DEFAULT_USERS: String(process.env.SEED_DEFAULT_USERS || '').trim().toLowerCase() === 'true',
+  HLS_SEGMENT_SECONDS: Math.max(2, Math.min(12, Number(process.env.HLS_SEGMENT_SECONDS) || 6)),
   CORS_ORIGINS: parseCorsOrigins(),
   STORAGE_DIR: path.resolve(ROOT_DIR, 'storage'),
   TMP_DIR: path.resolve(__dirname, '../tmp'),

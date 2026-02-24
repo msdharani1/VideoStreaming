@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { HLS_SEGMENT_SECONDS } = require('../config');
 
 function runProcess(command, args) {
   return new Promise((resolve, reject) => {
@@ -33,7 +34,7 @@ async function probeMedia(inputPath) {
     '-v',
     'error',
     '-show_entries',
-    'format=duration:stream=codec_type',
+    'format=duration:stream=codec_type,codec_name',
     '-of',
     'json',
     inputPath
@@ -41,11 +42,17 @@ async function probeMedia(inputPath) {
 
   const parsed = JSON.parse(stdout);
   const durationSec = Number(parsed?.format?.duration) || 0;
-  const hasAudio = Array.isArray(parsed?.streams)
-    ? parsed.streams.some((stream) => stream.codec_type === 'audio')
-    : false;
+  const streams = Array.isArray(parsed?.streams) ? parsed.streams : [];
+  const videoStream = streams.find((stream) => stream.codec_type === 'video');
+  const audioStream = streams.find((stream) => stream.codec_type === 'audio');
+  const hasAudio = Boolean(audioStream);
 
-  return { durationSec, hasAudio };
+  return {
+    durationSec,
+    hasAudio,
+    videoCodec: typeof videoStream?.codec_name === 'string' ? videoStream.codec_name.toLowerCase() : null,
+    audioCodec: typeof audioStream?.codec_name === 'string' ? audioStream.codec_name.toLowerCase() : null
+  };
 }
 
 function getRandomThumbnailSecond(durationSec) {
@@ -153,7 +160,7 @@ function buildFfmpegArgs(inputPath, outputDir, hasAudio) {
     '-f',
     'hls',
     '-hls_time',
-    '10',
+    String(HLS_SEGMENT_SECONDS),
     '-hls_playlist_type',
     'vod',
     '-hls_flags',
@@ -375,9 +382,61 @@ function generateTimelineFrames({ inputPath, outputDir, videoId, onProgress, onS
   });
 }
 
+function transcodeToBrowserMp4({ inputPath, outputPath, videoId }) {
+  return new Promise((resolve, reject) => {
+    const ffmpegArgs = [
+      '-y',
+      '-i',
+      inputPath,
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a:0?',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '22',
+      '-pix_fmt',
+      'yuv420p',
+      '-movflags',
+      '+faststart',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      outputPath
+    ];
+
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+    let lastError = '';
+
+    ffmpeg.stderr.on('data', (chunk) => {
+      const message = chunk.toString();
+      if (message) {
+        lastError = message.slice(-3000);
+        const trimmed = message.trim();
+        if (trimmed) {
+          console.log(`[ffmpeg-normal:${videoId}] ${trimmed}`);
+        }
+      }
+    });
+
+    ffmpeg.on('error', (error) => reject(error));
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        return resolve();
+      }
+      return reject(new Error(lastError || `ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
 module.exports = {
   transcodeToHls,
   createRandomThumbnail,
   generateTimelineFrames,
-  probeMedia
+  probeMedia,
+  transcodeToBrowserMp4
 };

@@ -94,8 +94,17 @@ export default function Navbar() {
             <div className="hidden md:flex items-center gap-2">
               {isAuthenticated ? (
                 <>
-                  <NavItem to="/videos" active={location.pathname.startsWith('/videos') || location.pathname.startsWith('/watch')}>
+                  <NavItem
+                    to="/videos"
+                    active={
+                      (location.pathname.startsWith('/videos') && !location.pathname.startsWith('/videos/normal'))
+                      || (location.pathname.startsWith('/watch') && !location.pathname.startsWith('/watch-normal'))
+                    }
+                  >
                     Videos
+                  </NavItem>
+                  <NavItem to="/videos/normal" active={location.pathname.startsWith('/videos/normal') || location.pathname.startsWith('/watch-normal')}>
+                    Normal Demo
                   </NavItem>
                   <NavItem to="/help" active={location.pathname.startsWith('/help')}>
                     Help
@@ -177,9 +186,20 @@ export default function Navbar() {
                     to="/videos"
                     mobile
                     onClick={() => setMobileOpen(false)}
-                    active={location.pathname.startsWith('/videos') || location.pathname.startsWith('/watch')}
+                    active={
+                      (location.pathname.startsWith('/videos') && !location.pathname.startsWith('/videos/normal'))
+                      || (location.pathname.startsWith('/watch') && !location.pathname.startsWith('/watch-normal'))
+                    }
                   >
                     Videos
+                  </NavItem>
+                  <NavItem
+                    to="/videos/normal"
+                    mobile
+                    onClick={() => setMobileOpen(false)}
+                    active={location.pathname.startsWith('/videos/normal') || location.pathname.startsWith('/watch-normal')}
+                  >
+                    Normal Demo
                   </NavItem>
                   <NavItem
                     to="/help"

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { deleteVideoById, generateTimelineForVideo, listVideos, syncVideoDuration, updateVideoTitle, uploadVideo } from '../api';
+import {
+  deleteVideoById,
+  generateTimelineForVideo,
+  importNormalVideoFromStorage,
+  listVideos,
+  listNormalImportFiles,
+  syncVideoDuration,
+  updateVideoTitle,
+  uploadVideo
+} from '../api';
 import { useAuth } from '../context/AuthContext';
 
 function formatSize(bytes) {
@@ -74,7 +83,11 @@ function UploadPage() {
   const { token } = useAuth();
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
+  const [uploadMode, setUploadMode] = useState('adaptive');
   const [uploading, setUploading] = useState(false);
+  const [importFiles, setImportFiles] = useState([]);
+  const [loadingImportFiles, setLoadingImportFiles] = useState(false);
+  const [selectedImportFile, setSelectedImportFile] = useState('');
   const [loadingVideos, setLoadingVideos] = useState(true);
   const [refreshingVideos, setRefreshingVideos] = useState(false);
   const [videos, setVideos] = useState([]);
@@ -114,25 +127,64 @@ function UploadPage() {
     }
   }, [token]);
 
+  const fetchImportFiles = useCallback(async (showLoading = false) => {
+    try {
+      if (showLoading) setLoadingImportFiles(true);
+      const files = await listNormalImportFiles(token);
+      setImportFiles(files);
+      setSelectedImportFile((current) => {
+        if (current && files.some((fileItem) => fileItem.name === current)) {
+          return current;
+        }
+        return files[0]?.name || '';
+      });
+    } catch (requestError) {
+      setError(requestError.message || 'Could not load import files');
+    } finally {
+      setLoadingImportFiles(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     fetchVideos();
     const timer = window.setInterval(() => fetchVideos(), 2000);
     return () => window.clearInterval(timer);
   }, [fetchVideos]);
 
+  useEffect(() => {
+    if (uploadMode !== 'normal') return;
+    fetchImportFiles(true);
+  }, [uploadMode, fetchImportFiles]);
+
   async function onSubmit(event) {
     event.preventDefault();
-    if (!file) {
+    if (uploadMode === 'adaptive' && !file) {
       setError('Select a video file before uploading.');
+      return;
+    }
+    if (uploadMode === 'normal' && !selectedImportFile) {
+      setError('Select a file from storage/normal-import before importing.');
       return;
     }
     setUploading(true);
     setError('');
     try {
-      await uploadVideo({ file, title: title.trim(), token });
+      if (uploadMode === 'normal') {
+        await importNormalVideoFromStorage({
+          fileName: selectedImportFile,
+          title: title.trim(),
+          token
+        });
+      } else {
+        await uploadVideo({ file, title: title.trim(), token });
+      }
       setTitle('');
       setFile(null);
+      setSelectedImportFile('');
       await fetchVideos(true);
+      if (uploadMode === 'normal') {
+        await fetchImportFiles(true);
+      }
       document.getElementById('videos-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (uploadError) {
       setError(uploadError.message || 'Upload failed');
@@ -230,10 +282,8 @@ function UploadPage() {
               Upload and Manage Videos
             </h1>
             <p className="text-text-secondary max-w-2xl text-base leading-relaxed">
-              Upload your videos and automatically transcode to <span className="text-accent font-semibold">360p</span>,{' '}
-              <span className="text-accent font-semibold">720p</span>, and{' '}
-              <span className="text-accent font-semibold">1080p</span> adaptive HLS streams.
-              Processing progress appears instantly below.
+              Upload either adaptive HLS videos (360p/720p/1080p) or normal direct-play videos for demo playback.
+              For normal mode, place files in <code className="text-accent">storage/normal-import</code> and import instantly.
             </p>
 
             {/* Stats */}
@@ -276,9 +326,46 @@ function UploadPage() {
       <section className="animate-rise-delay-1">
         <div className="rounded-2xl bg-bg-card border border-border p-6 md:p-8">
           <h2 className="text-xl font-bold text-text-primary mb-1">Upload Video</h2>
-          <p className="text-sm text-text-secondary mb-6">Drag & drop or select a video file to get started.</p>
+          <p className="text-sm text-text-secondary mb-6">
+            Adaptive mode uploads from browser. Normal mode imports files already copied to storage.
+          </p>
 
           <form onSubmit={onSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-text-secondary">Upload Type</label>
+              <div className="inline-flex rounded-xl border border-border bg-bg-tertiary/70 p-1">
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('adaptive')}
+                  disabled={uploading}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border-none cursor-pointer transition-colors ${
+                    uploadMode === 'adaptive'
+                      ? 'bg-accent text-white'
+                      : 'bg-transparent text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Adaptive HLS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('normal')}
+                  disabled={uploading}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border-none cursor-pointer transition-colors ${
+                    uploadMode === 'normal'
+                      ? 'bg-accent text-white'
+                      : 'bg-transparent text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Normal Video
+                </button>
+              </div>
+              <p className="text-xs text-text-muted">
+                {uploadMode === 'adaptive'
+                  ? 'Adaptive HLS transcodes in background and supports quality switching.'
+                  : 'Normal upload keeps the source file and plays with standard browser loading.'}
+              </p>
+            </div>
+
             {/* Title */}
             <div className="space-y-2">
               <label htmlFor="videoTitle" className="block text-sm font-semibold text-text-secondary">
@@ -295,63 +382,98 @@ function UploadPage() {
               />
             </div>
 
-            {/* Drop zone */}
-            <div
-              className={`drop-zone relative ${isDragOver ? 'drag-over' : ''}`}
-              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                disabled={uploading}
-                id="videoFile"
-              />
-              <div className="flex flex-col items-center gap-3">
-                <UploadCloudIcon />
-                <div>
-                  <p className="text-text-primary font-semibold">
-                    {isDragOver ? 'Drop your video here' : 'Drag & drop your video here'}
-                  </p>
-                  <p className="text-sm text-text-muted mt-1">or click to browse • MP4, MOV, AVI, MKV</p>
-                </div>
-              </div>
-            </div>
-
-            {/* File info chip */}
-            {fileInfo && (
-              <div className="flex items-center gap-4 bg-accent/5 border border-accent/20 rounded-xl p-4 animate-fade-in">
-                <div className="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
-                  <svg className="w-5 h-5 text-accent" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-text-primary truncate">{fileInfo.name}</p>
-                  <p className="text-xs text-text-muted">{fileInfo.type} • {fileInfo.size}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                  className="p-2 rounded-lg hover:bg-white/5 text-text-muted hover:text-red transition-colors"
-                  aria-label="Remove file"
+            {uploadMode === 'adaptive' ? (
+              <>
+                {/* Drop zone */}
+                <div
+                  className={`drop-zone relative ${isDragOver ? 'drag-over' : ''}`}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    disabled={uploading}
+                    id="videoFile"
+                  />
+                  <div className="flex flex-col items-center gap-3">
+                    <UploadCloudIcon />
+                    <div>
+                      <p className="text-text-primary font-semibold">
+                        {isDragOver ? 'Drop your video here' : 'Drag & drop your video here'}
+                      </p>
+                      <p className="text-sm text-text-muted mt-1">or click to browse • MP4, MOV, AVI, MKV</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* File info chip */}
+                {fileInfo && (
+                  <div className="flex items-center gap-4 bg-accent/5 border border-accent/20 rounded-xl p-4 animate-fade-in">
+                    <div className="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
+                      <svg className="w-5 h-5 text-accent" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-text-primary truncate">{fileInfo.name}</p>
+                      <p className="text-xs text-text-muted">{fileInfo.type} • {fileInfo.size}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                      className="p-2 rounded-lg hover:bg-white/5 text-text-muted hover:text-red transition-colors"
+                      aria-label="Remove file"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-xl bg-bg-tertiary/50 border border-border p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
+                  <p className="text-sm text-text-secondary">
+                    Copy video files to <span className="font-mono text-accent">storage/normal-import/</span>, then import.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => fetchImportFiles(true)}
+                    disabled={loadingImportFiles || uploading}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 border border-border rounded-lg text-xs font-semibold text-text-secondary disabled:opacity-50"
+                  >
+                    {loadingImportFiles ? 'Refreshing...' : 'Refresh Files'}
+                  </button>
+                </div>
+                <select
+                  value={selectedImportFile}
+                  onChange={(event) => setSelectedImportFile(event.target.value)}
+                  disabled={loadingImportFiles || uploading || importFiles.length === 0}
+                  className="w-full bg-bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+                >
+                  {importFiles.length === 0 ? (
+                    <option value="">No files found in storage/normal-import</option>
+                  ) : null}
+                  {importFiles.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name} ({formatSize(item.size)})
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
             {/* Submit */}
             <button
               type="submit"
-              disabled={uploading || !file}
+              disabled={uploading || (uploadMode === 'adaptive' ? !file : !selectedImportFile)}
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3 bg-accent hover:bg-accent-hover text-white font-bold rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent hover:shadow-lg hover:shadow-accent/20 active:scale-[0.98]"
               id="upload-button"
             >
@@ -361,14 +483,14 @@ function UploadPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  Uploading...
+                  {uploadMode === 'normal' ? 'Importing...' : 'Uploading...'}
                 </>
               ) : (
                 <>
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  Upload & Process
+                  {uploadMode === 'normal' ? 'Import from Storage' : 'Upload & Process'}
                 </>
               )}
             </button>
@@ -377,7 +499,9 @@ function UploadPage() {
           {uploading && (
             <p className="mt-4 text-sm text-accent font-medium flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-              Upload accepted. Transcoding job started.
+              {uploadMode === 'normal'
+                ? 'Importing file from storage...'
+                : 'Upload accepted. Transcoding job started.'}
             </p>
           )}
           {error && (
@@ -439,6 +563,7 @@ function UploadPage() {
               const isProcessing = video.status === 'processing';
               const isReady = video.status === 'ready';
               const isFailed = video.status === 'failed';
+              const isNormalPlayback = (video.playbackType || 'adaptive') === 'normal';
               const isTimelineReady = Boolean(video.timeline?.available);
               const isTimelineGenerating = Boolean(video.timeline?.generating) || generatingTimelineId === video.id;
 
@@ -525,10 +650,13 @@ function UploadPage() {
                           </span>
                         </div>
                         <p className="text-xs text-text-muted">{video.originalName || 'Unknown source'}</p>
+                        <p className="text-xs text-text-muted">
+                          Playback: {isNormalPlayback ? 'Normal' : 'Adaptive HLS'}
+                        </p>
                         <p className="text-xs text-text-muted">Duration: {formatDuration(video.durationSec)}</p>
                         <p className="text-xs text-text-muted/70 font-mono">{video.id}</p>
                         <p className="text-xs text-text-muted">{formatCreatedAt(video.createdAt)}</p>
-                        {isReady ? (
+                        {isReady && !isNormalPlayback ? (
                           <p className={`text-xs font-semibold ${isTimelineReady ? 'text-green' : isTimelineGenerating ? 'text-blue' : 'text-text-muted'}`}>
                             {isTimelineReady
                               ? `Timeline ready (${video.timeline?.frameCount || 0} frames)`
@@ -563,11 +691,11 @@ function UploadPage() {
                       <div className="flex flex-wrap items-center gap-2 pt-1">
                         {isReady ? (
                           <Link
-                            to={`/watch/${video.id}`}
+                            to={isNormalPlayback ? `/watch-normal/${video.id}` : `/watch/${video.id}`}
                             className="inline-flex items-center gap-1.5 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-bold rounded-lg transition-all duration-200 no-underline hover:shadow-lg hover:shadow-accent/20"
                           >
                             <PlayCircleIcon />
-                            Watch
+                            {isNormalPlayback ? 'Watch Normal' : 'Watch'}
                           </Link>
                         ) : (
                           <Link
@@ -587,7 +715,7 @@ function UploadPage() {
                         >
                           Edit
                         </button>
-                        {isReady ? (
+                        {isReady && !isNormalPlayback ? (
                           <button
                             type="button"
                             onClick={() => onGenerateTimeline(video.id)}

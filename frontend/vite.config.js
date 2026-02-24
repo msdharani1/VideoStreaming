@@ -38,6 +38,7 @@ export default defineConfig({
         rewrite: (requestPath) => requestPath.replace(/^\/api/, '')
       },
       '/stream': defaultProxyOptions,
+      '/normal-stream': defaultProxyOptions,
       '/thumbnail': defaultProxyOptions,
       '/timeline': defaultProxyOptions,
       '/storage': defaultProxyOptions,

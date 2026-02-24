@@ -56,8 +56,10 @@ function VideosPage() {
     return () => window.clearInterval(timer);
   }, [fetchVideos]);
 
+  const adaptiveVideos = videos.filter((video) => (video.playbackType || 'adaptive') !== 'normal');
+
   if (!isAdmin) {
-    const readyVideos = videos.filter((video) => video.status === 'ready');
+    const readyVideos = adaptiveVideos.filter((video) => video.status === 'ready');
 
     return (
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -65,14 +67,22 @@ function VideosPage() {
           <div className="rounded-2xl bg-bg-card border border-border p-6 md:p-8">
             <div className="flex items-center justify-between gap-3 mb-5">
               <h1 className="text-2xl font-black text-text-primary">Videos</h1>
-              <button
-                type="button"
-                onClick={() => fetchVideos(true)}
-                disabled={refreshing}
-                className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-              >
-                {refreshing ? 'Refreshing...' : 'Refresh'}
-              </button>
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/videos/normal"
+                  className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors no-underline"
+                >
+                  Normal Demo
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => fetchVideos(true)}
+                  disabled={refreshing}
+                  className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+                >
+                  {refreshing ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
             </div>
 
             {error ? <p className="text-sm text-red font-semibold mb-4">{error}</p> : null}
@@ -143,24 +153,32 @@ function VideosPage() {
               <h2 className="text-xl font-bold text-text-primary">Available Videos</h2>
               <p className="text-sm text-text-secondary mt-1">Ready and processing videos for all users.</p>
             </div>
-            <button
-              type="button"
-              onClick={() => fetchVideos(true)}
-              disabled={refreshing}
-              className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-            >
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/videos/normal"
+                className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors no-underline"
+              >
+                Normal Demo
+              </Link>
+              <button
+                type="button"
+                onClick={() => fetchVideos(true)}
+                disabled={refreshing}
+                className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
           </div>
 
           {error ? <p className="text-sm text-red font-semibold mb-4">{error}</p> : null}
           {loading ? <p className="text-sm text-text-muted">Loading videos...</p> : null}
-          {!loading && videos.length === 0 ? (
+          {!loading && adaptiveVideos.length === 0 ? (
             <p className="text-sm text-text-muted">No videos available.</p>
           ) : null}
 
           <div className="grid gap-4">
-            {videos.map((video) => {
+            {adaptiveVideos.map((video) => {
               const isReady = video.status === 'ready';
               const progress = Math.max(0, Math.min(100, Number(video.progress) || 0));
               return (

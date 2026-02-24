@@ -21,6 +21,9 @@ db.exec(`
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     original_name TEXT NOT NULL,
+    playback_type TEXT NOT NULL DEFAULT 'adaptive',
+    storage_path TEXT,
+    mime_type TEXT,
     status TEXT NOT NULL,
     progress INTEGER NOT NULL DEFAULT 0,
     process_step TEXT NOT NULL DEFAULT 'queued',
@@ -43,6 +46,15 @@ if (!existingColumns.has('error_message')) {
 if (!existingColumns.has('duration_sec')) {
   db.exec('ALTER TABLE videos ADD COLUMN duration_sec REAL');
 }
+if (!existingColumns.has('playback_type')) {
+  db.exec("ALTER TABLE videos ADD COLUMN playback_type TEXT NOT NULL DEFAULT 'adaptive'");
+}
+if (!existingColumns.has('storage_path')) {
+  db.exec('ALTER TABLE videos ADD COLUMN storage_path TEXT');
+}
+if (!existingColumns.has('mime_type')) {
+  db.exec('ALTER TABLE videos ADD COLUMN mime_type TEXT');
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -56,18 +68,66 @@ db.exec(`
 `);
 
 const insertVideoStmt = db.prepare(`
-  INSERT INTO videos (id, title, original_name, status, progress, process_step, error_message, duration_sec)
-  VALUES (@id, @title, @original_name, @status, @progress, @process_step, @error_message, @duration_sec)
+  INSERT INTO videos (
+    id,
+    title,
+    original_name,
+    playback_type,
+    storage_path,
+    mime_type,
+    status,
+    progress,
+    process_step,
+    error_message,
+    duration_sec
+  )
+  VALUES (
+    @id,
+    @title,
+    @original_name,
+    @playback_type,
+    @storage_path,
+    @mime_type,
+    @status,
+    @progress,
+    @process_step,
+    @error_message,
+    @duration_sec
+  )
 `);
 
 const getVideoStmt = db.prepare(`
-  SELECT id, title, original_name, status, progress, process_step, error_message, duration_sec, created_at
+  SELECT
+    id,
+    title,
+    original_name,
+    playback_type,
+    storage_path,
+    mime_type,
+    status,
+    progress,
+    process_step,
+    error_message,
+    duration_sec,
+    created_at
   FROM videos
   WHERE id = ?
 `);
 
 const listVideosStmt = db.prepare(`
-  SELECT id, title, original_name, status, progress, process_step, error_message, duration_sec, created_at
+  SELECT
+    id,
+    title,
+    original_name,
+    playback_type,
+    storage_path,
+    mime_type,
+    status,
+    progress,
+    process_step,
+    error_message,
+    duration_sec,
+    created_at
   FROM videos
   ORDER BY datetime(created_at) DESC, rowid DESC
 `);
@@ -159,7 +219,12 @@ if (SEED_DEFAULT_USERS) {
 }
 
 function createVideo(video) {
-  insertVideoStmt.run(video);
+  insertVideoStmt.run({
+    playback_type: 'adaptive',
+    storage_path: null,
+    mime_type: null,
+    ...video
+  });
 }
 
 function getVideoById(id) {

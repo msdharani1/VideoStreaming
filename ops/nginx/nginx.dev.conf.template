@@ -1,0 +1,110 @@
+worker_processes auto;
+pid __LOG_DIR__/nginx.pid;
+error_log __LOG_DIR__/nginx-error.log warn;
+
+events {
+  worker_connections 2048;
+  multi_accept on;
+}
+
+http {
+  default_type application/octet-stream;
+
+  types {
+    text/html html;
+    text/css css;
+    application/javascript js mjs;
+    application/json json;
+    application/xml xml;
+    image/svg+xml svg;
+    image/jpeg jpg jpeg;
+    image/png png;
+    image/webp webp;
+    font/woff2 woff2;
+    application/vnd.apple.mpegurl m3u8;
+    video/mp2t ts;
+    video/mp4 mp4 m4v;
+  }
+
+  sendfile on;
+  tcp_nopush on;
+  tcp_nodelay on;
+  keepalive_timeout 65;
+  keepalive_requests 10000;
+  server_tokens off;
+  client_max_body_size 12g;
+
+  proxy_http_version 1.1;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+
+  proxy_cache_path __CACHE_DIR__ levels=1:2 keys_zone=media_cache:128m max_size=8g inactive=24h use_temp_path=off;
+
+  server {
+    listen __NGINX_PORT__;
+    server_name _;
+    root __ROOT_DIR__/frontend/dist;
+    index index.html;
+    access_log __LOG_DIR__/nginx-access.log;
+
+    location = /health {
+      add_header Content-Type text/plain;
+      return 200 "ok\n";
+    }
+
+    location /api/ {
+      proxy_pass http://127.0.0.1:__BACKEND_PORT__/;
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
+      proxy_request_buffering off;
+    }
+
+    location ~* ^/stream/.+\.m3u8$ {
+      proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+      proxy_buffering off;
+      proxy_cache off;
+      add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+
+    location /normal-stream/ {
+      proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
+      proxy_request_buffering off;
+      proxy_buffering off;
+      proxy_cache off;
+      add_header Cache-Control "private, no-cache, must-revalidate" always;
+    }
+
+    location ~* ^/(stream|storage)/.+\.(ts|m4s|mp4)$ {
+      proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+      proxy_cache media_cache;
+      proxy_cache_lock on;
+      proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+      proxy_cache_valid 200 206 30d;
+      proxy_ignore_headers Set-Cookie;
+      proxy_hide_header Set-Cookie;
+      add_header Cache-Control "public, max-age=2592000, immutable" always;
+      add_header X-Cache-Status $upstream_cache_status always;
+    }
+
+    location ~* ^/(thumbnail|timeline)/ {
+      proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+      proxy_cache media_cache;
+      proxy_cache_lock on;
+      proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+      proxy_cache_valid 200 24h;
+      proxy_ignore_headers Set-Cookie;
+      proxy_hide_header Set-Cookie;
+      proxy_hide_header Cache-Control;
+      add_header Cache-Control "public, max-age=86400" always;
+      add_header X-Cache-Status $upstream_cache_status always;
+    }
+
+    location / {
+      try_files $uri $uri/ /index.html;
+    }
+  }
+}

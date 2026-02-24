@@ -4,6 +4,8 @@ import ScrollToTop from './components/ScrollToTop';
 import { useAuth } from './context/AuthContext';
 import HelpPage from './pages/HelpPage';
 import LoginPage from './pages/LoginPage';
+import NormalVideosPage from './pages/NormalVideosPage';
+import NormalWatchPage from './pages/NormalWatchPage';
 import ProcessPage from './pages/ProcessPage';
 import UploadPage from './pages/UploadPage';
 import VideosPage from './pages/VideosPage';
@@ -48,6 +50,14 @@ function App() {
           }
         />
         <Route
+          path="/videos/normal"
+          element={
+            <RequireAuth>
+              <NormalVideosPage />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/admin"
           element={
             <RequireAuth>
@@ -72,6 +82,14 @@ function App() {
           element={
             <RequireAuth>
               <WatchPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/watch-normal/:id"
+          element={
+            <RequireAuth>
+              <NormalWatchPage />
             </RequireAuth>
           }
         />

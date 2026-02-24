@@ -73,7 +73,7 @@ function WatchPage() {
     try {
       const allVideos = await listVideos();
       const nextVideos = allVideos
-        .filter((video) => video.status === 'ready' && video.id !== id)
+        .filter((video) => video.status === 'ready' && video.id !== id && (video.playbackType || 'adaptive') !== 'normal')
         .slice(0, 20);
       setRelatedVideos(nextVideos);
       setRelatedError('');
@@ -98,6 +98,11 @@ function WatchPage() {
 
         if (statusCode === 202) {
           navigate(`/process/${id}`, { replace: true });
+          return;
+        }
+
+        if ((payload.playbackType || 'adaptive') === 'normal') {
+          navigate(`/watch-normal/${id}`, { replace: true });
           return;
         }
 
