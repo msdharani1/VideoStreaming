@@ -86,9 +86,19 @@ CLOUDFLARE_PUBLIC_URL="$(wait_for_cloudflare_url || true)"
 # Make sure the backend config knows about this new Cloudflare URL so CORS works correctly
 export PUBLIC_HOSTS="${CLOUDFLARE_PUBLIC_URL#https://}"
 
+if [ ! -d "node_modules" ]; then
+  log "node_modules not found, running npm install..."
+  npm install
+fi
+
 log "Starting backend..."
 npm run dev --workspace backend >"$BACKEND_LOG_FILE" 2>&1 &
 BACKEND_PID=$!
+
+sleep 3
+if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+  fail "Backend crashed immediately! Check logs: cat $BACKEND_LOG_FILE"
+fi
 
 echo ""
 log "✅ Backend and Tunnel are successfully running!"
