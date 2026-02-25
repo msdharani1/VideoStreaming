@@ -1,7 +1,8 @@
 import Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { getVideoStream, listVideos } from '../api';
+import { getVideoStream } from '../api';
+import { fetchVideosOnce } from '../services/videoStore';
 import VideoPlayer from '../components/VideoPlayer';
 
 function extractToken(streamUrl) {
@@ -71,7 +72,7 @@ function WatchPage() {
     if (!id) return;
     setRelatedLoading(true);
     try {
-      const allVideos = await listVideos();
+      const allVideos = await fetchVideosOnce();
       const nextVideos = allVideos
         .filter((video) => video.status === 'ready' && video.id !== id && (video.playbackType || 'adaptive') !== 'normal')
         .slice(0, 20);

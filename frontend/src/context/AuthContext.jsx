@@ -1,17 +1,40 @@
-import { createContext, useContext, useMemo, useState } from 'react';
-import { loginWithEmailPassword, signupWithEmailPassword } from '../api';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createUserWithEmailAndPassword,
+  onIdTokenChanged,
+  signInWithEmailAndPassword,
+  signOut
+} from 'firebase/auth';
+import { auth } from '../firebase';
 
-const SESSION_KEY = 'primeview_session_v1';
+const SESSION_KEY = 'cloudstream_session_v1';
 
 const AuthContext = createContext(null);
 
-function readStoredSession() {
+function parseAdminEmails() {
+  const raw = import.meta.env.VITE_ADMIN_EMAILS || import.meta.env.VITE_ADMIN_OWNER_EMAIL || '';
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+const ADMIN_EMAILS = parseAdminEmails();
+
+function isAdminEmail(email) {
+  if (!email) return false;
+  const normalized = String(email).trim().toLowerCase();
+  if (!normalized) return false;
+  if (ADMIN_EMAILS.length === 0) return false;
+  return ADMIN_EMAILS.includes(normalized);
+}
+
+function readStoredGuest() {
   try {
     const raw = window.localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed?.user?.role) return null;
-    if (parsed.user.role !== 'guest' && !parsed?.token) return null;
+    if (parsed?.user?.role !== 'guest') return null;
     return parsed;
   } catch {
     return null;
@@ -19,44 +42,84 @@ function readStoredSession() {
 }
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(() => readStoredSession());
+  const [session, setSession] = useState(() => readStoredGuest());
+  const [authReady, setAuthReady] = useState(false);
 
-  function writeSession(nextSession) {
-    window.localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+  useEffect(() => {
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
+      if (user) {
+        const token = await user.getIdToken();
+        const role = isAdminEmail(user.email) ? 'admin' : 'user';
+        setSession({
+          token,
+          user: {
+            id: user.uid,
+            email: user.email || '',
+            role
+          }
+        });
+        window.localStorage.removeItem(SESSION_KEY);
+      } else {
+        setSession(readStoredGuest());
+      }
+      setAuthReady(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  async function login(email, password) {
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    const token = await credential.user.getIdToken();
+    const role = isAdminEmail(credential.user.email) ? 'admin' : 'user';
+    const nextSession = {
+      token,
+      user: {
+        id: credential.user.uid,
+        email: credential.user.email || '',
+        role
+      }
+    };
     setSession(nextSession);
+    window.localStorage.removeItem(SESSION_KEY);
     return nextSession;
   }
 
-  async function login(email, password) {
-    const payload = await loginWithEmailPassword({ email, password });
-    return writeSession({
-      token: payload.token,
-      user: payload.user
-    });
-  }
-
   async function signup(email, password) {
-    const payload = await signupWithEmailPassword({ email, password });
-    return writeSession({
-      token: payload.token,
-      user: payload.user
-    });
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    const token = await credential.user.getIdToken();
+    const role = isAdminEmail(credential.user.email) ? 'admin' : 'user';
+    const nextSession = {
+      token,
+      user: {
+        id: credential.user.uid,
+        email: credential.user.email || '',
+        role
+      }
+    };
+    setSession(nextSession);
+    window.localStorage.removeItem(SESSION_KEY);
+    return nextSession;
   }
 
   function continueAsGuest() {
-    return writeSession({
+    const guestSession = {
       token: '',
       user: {
         id: 'guest',
         email: 'guest@local',
         role: 'guest'
       }
-    });
+    };
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(guestSession));
+    setSession(guestSession);
+    return guestSession;
   }
 
-  function logout() {
+  async function logout() {
     window.localStorage.removeItem(SESSION_KEY);
     setSession(null);
+    await signOut(auth);
   }
 
   const value = useMemo(
@@ -67,12 +130,13 @@ export function AuthProvider({ children }) {
       isSignedIn: Boolean(session?.token),
       isGuest: session?.user?.role === 'guest',
       isAdmin: session?.user?.role === 'admin',
+      authReady,
       login,
       signup,
       continueAsGuest,
       logout
     }),
-    [session]
+    [session, authReady]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

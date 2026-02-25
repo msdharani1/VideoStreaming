@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listVideos } from '../api';
+import { fetchVideosOnce, subscribeToVideos } from '../services/videoStore';
 
 function formatDuration(seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -12,6 +12,10 @@ function formatDuration(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function sortByNewest(a, b) {
+  return (b.createdAtMs || 0) - (a.createdAtMs || 0);
+}
+
 function NormalVideosPage() {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,39 +23,49 @@ function NormalVideosPage() {
   const [thumbErrors, setThumbErrors] = useState({});
   const [error, setError] = useState('');
 
-  const fetchVideos = useCallback(async (manual = false) => {
+  useEffect(() => {
+    const unsubscribe = subscribeToVideos(
+      (allVideos) => {
+        const normalVideos = allVideos
+          .filter((video) => video.status === 'ready' && (video.playbackType || 'adaptive') === 'normal')
+          .sort(sortByNewest);
+        setVideos(normalVideos);
+        setError('');
+        setLoading(false);
+      },
+      (err) => {
+        setError(err?.message || 'Could not load normal videos');
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const refreshNow = useCallback(async () => {
     try {
-      if (manual) setRefreshing(true);
-      const allVideos = await listVideos();
-      const normalReady = allVideos.filter(
-        (video) => video.status === 'ready' && (video.playbackType || 'adaptive') === 'normal'
-      );
-      setVideos(normalReady);
+      setRefreshing(true);
+      const allVideos = await fetchVideosOnce();
+      const normalVideos = allVideos
+        .filter((video) => video.status === 'ready' && (video.playbackType || 'adaptive') === 'normal')
+        .sort(sortByNewest);
+      setVideos(normalVideos);
       setError('');
-      setThumbErrors({});
     } catch (requestError) {
       setError(requestError.message || 'Could not load normal videos');
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }, []);
-
-  useEffect(() => {
-    fetchVideos();
-    const timer = window.setInterval(() => fetchVideos(), 3000);
-    return () => window.clearInterval(timer);
-  }, [fetchVideos]);
 
   return (
     <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <section className="animate-rise">
         <div className="rounded-2xl bg-bg-card border border-border p-6 md:p-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent mb-1">Demo</p>
-              <h1 className="text-2xl md:text-3xl font-black text-text-primary">Normal Video Playback</h1>
-              <p className="text-sm text-text-secondary mt-2">
+              <h1 className="text-2xl font-black text-text-primary">Normal Videos</h1>
+              <p className="text-sm text-text-secondary mt-1">
                 Browser-native direct video loading without adaptive HLS.
               </p>
             </div>
@@ -64,7 +78,7 @@ function NormalVideosPage() {
               </Link>
               <button
                 type="button"
-                onClick={() => fetchVideos(true)}
+                onClick={refreshNow}
                 disabled={refreshing}
                 className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
               >
@@ -79,11 +93,11 @@ function NormalVideosPage() {
             <p className="text-sm text-text-muted">No normal videos available yet.</p>
           ) : null}
 
-          <div className="grid gap-4">
+          <div className="space-y-4">
             {videos.map((video) => (
               <article
                 key={video.id}
-                className="rounded-xl bg-bg-tertiary/50 border border-border hover:border-border-strong transition-colors overflow-hidden"
+                className="rounded-xl bg-bg-tertiary/50 border border-border overflow-hidden"
               >
                 <div className="flex flex-col sm:flex-row">
                   <div className="relative sm:w-52 md:w-64 shrink-0 aspect-video bg-bg-secondary overflow-hidden">
@@ -96,26 +110,21 @@ function NormalVideosPage() {
                         onError={() => setThumbErrors((current) => ({ ...current, [video.id]: true }))}
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-text-muted text-xs">No thumbnail</div>
+                      <div className="w-full h-full flex items-center justify-center text-text-muted text-sm">No thumbnail</div>
                     )}
                   </div>
-                  <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between gap-3">
-                    <div>
+                  <div className="flex-1 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="min-w-0">
                       <h2 className="font-bold text-text-primary">{video.title || 'Untitled Video'}</h2>
                       <p className="text-xs text-text-muted mt-1">{video.originalName || 'Unknown source'}</p>
                       <p className="text-xs text-text-muted mt-1">Duration: {formatDuration(video.durationSec)}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full bg-blue/15 text-blue">
-                        Normal
-                      </span>
-                      <Link
-                        to={`/watch-normal/${video.id}`}
-                        className="inline-flex items-center justify-center px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-bold rounded-lg transition-colors no-underline"
-                      >
-                        Watch
-                      </Link>
-                    </div>
+                    <Link
+                      to={`/watch-normal/${video.id}`}
+                      className="inline-flex items-center justify-center px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-bold rounded-lg transition-colors no-underline sm:w-auto w-full"
+                    >
+                      Watch
+                    </Link>
                   </div>
                 </div>
               </article>

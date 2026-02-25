@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listVideos } from '../api';
+import { fetchVideosOnce, subscribeToVideos } from '../services/videoStore';
 import { useAuth } from '../context/AuthContext';
 
 function formatCreatedAt(value) {
@@ -28,6 +28,10 @@ function formatDuration(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function sortByNewest(a, b) {
+  return (b.createdAtMs || 0) - (a.createdAtMs || 0);
+}
+
 function VideosPage() {
   const { isAdmin } = useAuth();
   const [videos, setVideos] = useState([]);
@@ -36,25 +40,34 @@ function VideosPage() {
   const [thumbErrors, setThumbErrors] = useState({});
   const [error, setError] = useState('');
 
-  const fetchVideos = useCallback(async (manual = false) => {
+  useEffect(() => {
+    const unsubscribe = subscribeToVideos(
+      (allVideos) => {
+        setVideos(allVideos.sort(sortByNewest));
+        setError('');
+        setLoading(false);
+      },
+      (err) => {
+        setError(err?.message || 'Could not load videos');
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const refreshNow = useCallback(async () => {
     try {
-      if (manual) setRefreshing(true);
-      const allVideos = await listVideos();
-      setVideos(allVideos);
+      setRefreshing(true);
+      const allVideos = await fetchVideosOnce();
+      setVideos(allVideos.sort(sortByNewest));
       setError('');
     } catch (requestError) {
       setError(requestError.message || 'Could not load videos');
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }, []);
-
-  useEffect(() => {
-    fetchVideos();
-    const timer = window.setInterval(() => fetchVideos(), 2500);
-    return () => window.clearInterval(timer);
-  }, [fetchVideos]);
 
   const adaptiveVideos = videos.filter((video) => (video.playbackType || 'adaptive') !== 'normal');
 
@@ -76,7 +89,7 @@ function VideosPage() {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => fetchVideos(true)}
+                  onClick={refreshNow}
                   disabled={refreshing}
                   className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
                 >
@@ -162,7 +175,7 @@ function VideosPage() {
               </Link>
               <button
                 type="button"
-                onClick={() => fetchVideos(true)}
+                onClick={refreshNow}
                 disabled={refreshing}
                 className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-border rounded-xl text-sm font-semibold text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
               >
@@ -218,31 +231,35 @@ function VideosPage() {
                       </div>
 
                       {video.status === 'processing' ? (
-                        <div className="space-y-1">
-                          <p className="text-xs text-text-muted">{video.processStep || 'Processing'}</p>
-                          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs text-text-secondary">
+                            <span>{video.processStep || 'Processing'}</span>
+                            <span>{progress}%</span>
+                          </div>
+                          <div className="h-2 bg-white/5 rounded-full overflow-hidden">
                             <div
-                              className="h-full rounded-full bg-gradient-to-r from-accent to-blue transition-all"
+                              className="h-full bg-gradient-to-r from-accent to-blue"
                               style={{ width: `${progress}%` }}
                             />
                           </div>
                         </div>
                       ) : null}
 
-                      <div className="flex items-center gap-2">
-                        {isReady ? (
+                      {isReady ? (
+                        <div className="flex flex-wrap items-center gap-3">
                           <Link
                             to={`/watch/${video.id}`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-bold rounded-lg transition-colors no-underline"
+                            className="inline-flex items-center justify-center px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-bold rounded-lg transition-colors no-underline"
                           >
                             Watch
                           </Link>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/5 border border-border text-text-secondary text-sm font-semibold rounded-lg">
-                            Processing
-                          </span>
-                        )}
-                      </div>
+                          <span className="text-xs text-text-muted">Duration: {formatDuration(video.durationSec)}</span>
+                        </div>
+                      ) : null}
+
+                      {video.status === 'failed' ? (
+                        <p className="text-xs text-red font-semibold">{video.error || 'Processing failed.'}</p>
+                      ) : null}
                     </div>
                   </div>
                 </article>

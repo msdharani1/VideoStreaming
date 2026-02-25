@@ -1,4 +1,6 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
+import { fetchVideoOnce } from './services/videoStore';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
 async function parseJsonOrThrow(response) {
   const isJson = response.headers.get('content-type')?.includes('application/json');
@@ -18,36 +20,11 @@ function buildAuthHeaders(token) {
 }
 
 async function request(path, options = {}) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured');
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, options);
   return parseJsonOrThrow(response);
-}
-
-export async function loginWithEmailPassword({ email, password }) {
-  return request('/auth/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ email, password })
-  });
-}
-
-export async function signupWithEmailPassword({ email, password }) {
-  return request('/auth/signup', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ email, password })
-  });
-}
-
-export async function getMe(token) {
-  return request('/auth/me', {
-    headers: {
-      ...buildAuthHeaders(token)
-    }
-  });
 }
 
 export async function uploadVideo({ file, title, token }) {
@@ -109,65 +86,114 @@ export async function importNormalVideoFromStorage({ fileName, title, token }) {
 }
 
 export async function getVideoStream(videoId) {
-  const response = await fetch(`${API_BASE_URL}/video/${videoId}`);
+  const video = await fetchVideoOnce(videoId);
+  if (!video) {
+    throw new Error('video not found');
+  }
 
-  if (response.status === 202) {
-    const payload = await response.json();
+  if (video.status !== 'ready') {
     return {
-      statusCode: response.status,
-      payload
+      statusCode: 202,
+      payload: {
+        id: video.id,
+        title: video.title,
+        playbackType: video.playbackType || 'adaptive',
+        status: video.status,
+        progress: video.progress || 0,
+        processStep: video.processStep || 'Processing',
+        error: video.error || null,
+        durationSec: Number(video.durationSec) || 0,
+        thumbnailUrl: video.thumbnailUrl || ''
+      }
     };
   }
 
-  const payload = await parseJsonOrThrow(response);
   return {
-    statusCode: response.status,
-    payload
+    statusCode: 200,
+    payload: {
+      id: video.id,
+      title: video.title,
+      playbackType: video.playbackType || 'adaptive',
+      status: video.status,
+      durationSec: Number(video.durationSec) || 0,
+      mimeType: video.mimeType || null,
+      thumbnailUrl: video.thumbnailUrl || '',
+      streamUrl: video.streamUrl || '',
+      timeline: video.timeline || null
+    }
   };
 }
 
 export async function getNormalVideoStream(videoId) {
-  const response = await fetch(`${API_BASE_URL}/video/${videoId}/normal`);
+  const video = await fetchVideoOnce(videoId);
+  if (!video) {
+    throw new Error('video not found');
+  }
 
-  if (response.status === 202) {
-    const payload = await response.json();
+  if ((video.playbackType || 'adaptive') !== 'normal') {
+    throw new Error('video is not configured for normal playback');
+  }
+
+  if (video.status !== 'ready') {
     return {
-      statusCode: response.status,
-      payload
+      statusCode: 202,
+      payload: {
+        id: video.id,
+        title: video.title,
+        playbackType: video.playbackType || 'normal',
+        status: video.status,
+        progress: video.progress || 0,
+        processStep: video.processStep || 'Processing',
+        error: video.error || null,
+        durationSec: Number(video.durationSec) || 0,
+        thumbnailUrl: video.thumbnailUrl || ''
+      }
     };
   }
 
-  const payload = await parseJsonOrThrow(response);
   return {
-    statusCode: response.status,
-    payload
+    statusCode: 200,
+    payload: {
+      id: video.id,
+      title: video.title,
+      status: video.status,
+      durationSec: Number(video.durationSec) || 0,
+      mimeType: video.mimeType || null,
+      thumbnailUrl: video.thumbnailUrl || '',
+      sourceUrl: video.sourceUrl || ''
+    }
   };
 }
 
 export async function getUploadStatus(videoId) {
-  const response = await fetch(`${API_BASE_URL}/upload/${videoId}`);
-  const payload = await parseJsonOrThrow(response);
-  return payload;
-}
-
-export async function listVideos() {
-  const response = await fetch(`${API_BASE_URL}/videos`);
-  const payload = await parseJsonOrThrow(response);
-  return payload.videos || [];
+  const video = await fetchVideoOnce(videoId);
+  if (!video) {
+    throw new Error('upload not found');
+  }
+  return {
+    id: video.id,
+    title: video.title,
+    playbackType: video.playbackType || 'adaptive',
+    status: video.status,
+    progress: video.progress || 0,
+    processStep: video.processStep || 'Processing',
+    error: video.error || null,
+    durationSec: Number(video.durationSec) || 0,
+    thumbnailUrl: video.thumbnailUrl || ''
+  };
 }
 
 export async function deleteVideoById(videoId, token) {
-  const response = await fetch(`${API_BASE_URL}/video/${videoId}`, {
+  return request(`/video/${videoId}`, {
     method: 'DELETE',
     headers: {
       ...buildAuthHeaders(token)
     }
   });
-  return parseJsonOrThrow(response);
 }
 
 export async function updateVideoTitle(videoId, title, token) {
-  const response = await fetch(`${API_BASE_URL}/video/${videoId}`, {
+  return request(`/video/${videoId}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -175,25 +201,22 @@ export async function updateVideoTitle(videoId, title, token) {
     },
     body: JSON.stringify({ title })
   });
-  return parseJsonOrThrow(response);
 }
 
 export async function syncVideoDuration(videoId, token) {
-  const response = await fetch(`${API_BASE_URL}/video/${videoId}/duration/sync`, {
+  return request(`/video/${videoId}/duration/sync`, {
     method: 'POST',
     headers: {
       ...buildAuthHeaders(token)
     }
   });
-  return parseJsonOrThrow(response);
 }
 
 export async function generateTimelineForVideo(videoId, token) {
-  const response = await fetch(`${API_BASE_URL}/video/${videoId}/timeline/generate`, {
+  return request(`/video/${videoId}/timeline/generate`, {
     method: 'POST',
     headers: {
       ...buildAuthHeaders(token)
     }
   });
-  return parseJsonOrThrow(response);
 }

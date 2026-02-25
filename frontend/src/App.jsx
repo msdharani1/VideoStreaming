@@ -13,7 +13,10 @@ import WatchPage from './pages/WatchPage';
 
 function RequireAuth({ children }) {
   const location = useLocation();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authReady } = useAuth();
+  if (!authReady) {
+    return null;
+  }
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
@@ -21,7 +24,10 @@ function RequireAuth({ children }) {
 }
 
 function RequireAdmin({ children }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, authReady } = useAuth();
+  if (!authReady) {
+    return null;
+  }
   if (!isAdmin) {
     return <Navigate to="/videos" replace />;
   }
@@ -29,7 +35,7 @@ function RequireAdmin({ children }) {
 }
 
 function App() {
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { isAuthenticated, isAdmin, authReady } = useAuth();
 
   return (
     <div className="min-h-screen bg-bg-primary">
@@ -38,7 +44,11 @@ function App() {
       <Routes>
         <Route
           path="/"
-          element={<Navigate to={isAuthenticated ? (isAdmin ? '/admin' : '/videos') : '/login'} replace />}
+          element={
+            authReady
+              ? <Navigate to={isAuthenticated ? (isAdmin ? '/admin' : '/videos') : '/login'} replace />
+              : null
+          }
         />
         <Route path="/login" element={<LoginPage />} />
         <Route

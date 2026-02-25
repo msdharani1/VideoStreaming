@@ -4,12 +4,12 @@ import {
   deleteVideoById,
   generateTimelineForVideo,
   importNormalVideoFromStorage,
-  listVideos,
   listNormalImportFiles,
   syncVideoDuration,
   updateVideoTitle,
   uploadVideo
 } from '../api';
+import { fetchVideosOnce, subscribeToVideos } from '../services/videoStore';
 import { useAuth } from '../context/AuthContext';
 
 function formatSize(bytes) {
@@ -41,6 +41,10 @@ function statusLabel(status) {
   if (status === 'ready') return 'Ready';
   if (status === 'failed') return 'Failed';
   return 'Processing';
+}
+
+function sortByNewest(a, b) {
+  return (b.createdAtMs || 0) - (a.createdAtMs || 0);
 }
 
 const UploadCloudIcon = () => (
@@ -115,8 +119,8 @@ function UploadPage() {
   const fetchVideos = useCallback(async (showRefreshing = false) => {
     try {
       if (showRefreshing) setRefreshingVideos(true);
-      const allVideos = await listVideos();
-      setVideos(allVideos);
+      const allVideos = await fetchVideosOnce();
+      setVideos(allVideos.sort(sortByNewest));
       setThumbErrors({});
       setDeleteError('');
     } catch (requestError) {
@@ -125,7 +129,7 @@ function UploadPage() {
       setLoadingVideos(false);
       setRefreshingVideos(false);
     }
-  }, [token]);
+  }, []);
 
   const fetchImportFiles = useCallback(async (showLoading = false) => {
     try {
@@ -146,10 +150,21 @@ function UploadPage() {
   }, [token]);
 
   useEffect(() => {
-    fetchVideos();
-    const timer = window.setInterval(() => fetchVideos(), 2000);
-    return () => window.clearInterval(timer);
-  }, [fetchVideos]);
+    const unsubscribe = subscribeToVideos(
+      (allVideos) => {
+        setVideos(allVideos.sort(sortByNewest));
+        setThumbErrors({});
+        setDeleteError('');
+        setLoadingVideos(false);
+      },
+      (err) => {
+        setDeleteError(err?.message || 'Could not load videos');
+        setLoadingVideos(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (uploadMode !== 'normal') return;

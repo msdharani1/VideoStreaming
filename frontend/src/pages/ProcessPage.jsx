@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { getUploadStatus } from '../api';
+import { subscribeToVideo } from '../services/videoStore';
 
 const PIPELINE_STEPS = [
   { label: 'Upload accepted', icon: '📤', minProgress: 0 },
@@ -13,7 +13,6 @@ const PIPELINE_STEPS = [
 function ProcessPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const pollTimerRef = useRef(null);
   const redirectScheduledRef = useRef(false);
 
   const [state, setState] = useState({
@@ -26,48 +25,42 @@ function ProcessPage() {
   });
   const [error, setError] = useState('');
 
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current) {
-      window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  }, []);
-
-  const fetchStatus = useCallback(async () => {
-    if (!id) return;
-    try {
-      const payload = await getUploadStatus(id);
-      setState({
-        title: payload.title || '',
-        playbackType: payload.playbackType || 'adaptive',
-        status: payload.status,
-        progress: Number(payload.progress) || 0,
-        processStep: payload.processStep || 'Processing',
-        error: payload.error || null
-      });
-      setError('');
-
-      if (payload.status === 'ready') {
-        stopPolling();
-        if (!redirectScheduledRef.current) {
-          redirectScheduledRef.current = true;
-          const targetPath = (payload.playbackType || 'adaptive') === 'normal' ? `/watch-normal/${id}` : `/watch/${id}`;
-          window.setTimeout(() => navigate(targetPath), 1500);
-        }
-      }
-      if (payload.status === 'failed') {
-        stopPolling();
-      }
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }, [id, navigate, stopPolling]);
-
   useEffect(() => {
-    fetchStatus();
-    pollTimerRef.current = window.setInterval(fetchStatus, 1500);
-    return () => stopPolling();
-  }, [fetchStatus, stopPolling]);
+    if (!id) return undefined;
+
+    const unsubscribe = subscribeToVideo(
+      id,
+      (video) => {
+        if (!video) {
+          setError('Upload not found');
+          return;
+        }
+
+        setState({
+          title: video.title || '',
+          playbackType: video.playbackType || 'adaptive',
+          status: video.status || 'processing',
+          progress: Number(video.progress) || 0,
+          processStep: video.processStep || 'Processing',
+          error: video.error || null
+        });
+        setError('');
+
+        if (video.status === 'ready') {
+          if (!redirectScheduledRef.current) {
+            redirectScheduledRef.current = true;
+            const targetPath = (video.playbackType || 'adaptive') === 'normal' ? `/watch-normal/${id}` : `/watch/${id}`;
+            window.setTimeout(() => navigate(targetPath), 1500);
+          }
+        }
+      },
+      (err) => {
+        setError(err?.message || 'Could not fetch status');
+      }
+    );
+
+    return () => unsubscribe();
+  }, [id, navigate]);
 
   const normalizedProgress = Math.max(0, Math.min(100, Math.round(state.progress || 0)));
   const isReady = state.status === 'ready';
@@ -218,31 +211,14 @@ function ProcessPage() {
                 onClick={() => navigate(state.playbackType === 'normal' ? `/watch-normal/${id}` : `/watch/${id}`)}
                 className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-hover text-white font-bold rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-accent/20 border-none cursor-pointer"
               >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                Go to Player
+                Watch Now
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={fetchStatus}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-border text-text-secondary font-semibold rounded-xl transition-all duration-200 cursor-pointer"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Refresh Progress
-              </button>
-            )}
+            ) : null}
             <Link
-              to="/"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-border text-text-secondary font-semibold rounded-xl transition-all duration-200 no-underline"
+              to="/admin"
+              className="inline-flex items-center justify-center px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-border text-text-secondary font-semibold rounded-xl transition-all no-underline"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              Back to Home
+              Back to Dashboard
             </Link>
           </div>
         </div>

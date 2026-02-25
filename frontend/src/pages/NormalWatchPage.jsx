@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getNormalVideoStream, listVideos } from '../api';
+import { fetchVideosOnce, subscribeToVideo } from '../services/videoStore';
 
 function formatDuration(seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -25,37 +25,54 @@ function NormalWatchPage() {
   const [relatedError, setRelatedError] = useState('');
   const [thumbErrors, setThumbErrors] = useState({});
 
-  const fetchVideo = useCallback(async ({ silent = false } = {}) => {
-    if (!id) return;
-    if (!silent) {
-      setStatus('loading');
-      setMessage('Preparing direct video stream...');
-    }
+  useEffect(() => {
+    if (!id) return undefined;
+    const unsubscribe = subscribeToVideo(
+      id,
+      (video) => {
+        if (!video) {
+          setStatus('error');
+          setMessage('Video not found.');
+          return;
+        }
 
-    try {
-      const { statusCode, payload } = await getNormalVideoStream(id);
-      if (statusCode === 202) {
-        setStatus('processing');
-        setMessage(payload?.processStep || 'Video is still processing.');
-        return;
+        if ((video.playbackType || 'adaptive') !== 'normal') {
+          setStatus('error');
+          setMessage('Video is not configured for normal playback.');
+          return;
+        }
+
+        if (video.status !== 'ready') {
+          if (video.status === 'failed') {
+            setStatus('error');
+            setMessage(video.error || 'Video processing failed.');
+          } else {
+            setStatus('processing');
+            setMessage(video.processStep || 'Video is still processing.');
+          }
+          return;
+        }
+
+        setTitle(video.title || `Video ${id}`);
+        setDurationSec(Number(video.durationSec) || 0);
+        setThumbnailUrl(video.thumbnailUrl || '');
+        setSourceUrl(video.sourceUrl || '');
+        setStatus('ready');
+        setMessage('');
+      },
+      (err) => {
+        setStatus('error');
+        setMessage(err?.message || 'Could not prepare normal video stream.');
       }
+    );
 
-      setTitle(payload.title || `Video ${id}`);
-      setDurationSec(Number(payload.durationSec) || 0);
-      setThumbnailUrl(payload.thumbnailUrl || '');
-      setSourceUrl(payload.sourceUrl || '');
-      setStatus('ready');
-      setMessage('');
-    } catch (error) {
-      setStatus('error');
-      setMessage(error.message || 'Could not prepare normal video stream.');
-    }
+    return () => unsubscribe();
   }, [id]);
 
   const fetchRelated = useCallback(async () => {
     if (!id) return;
     try {
-      const allVideos = await listVideos();
+      const allVideos = await fetchVideosOnce();
       const next = allVideos
         .filter(
           (video) => video.id !== id && video.status === 'ready' && (video.playbackType || 'adaptive') === 'normal'
@@ -70,17 +87,8 @@ function NormalWatchPage() {
   }, [id]);
 
   useEffect(() => {
-    fetchVideo();
     fetchRelated();
-  }, [fetchVideo, fetchRelated]);
-
-  useEffect(() => {
-    if (status !== 'processing') return undefined;
-    const timer = window.setInterval(() => {
-      fetchVideo({ silent: true });
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [status, fetchVideo]);
+  }, [fetchRelated]);
 
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -104,7 +112,7 @@ function NormalWatchPage() {
                 <p className="text-sm text-red font-semibold">{message}</p>
                 <button
                   type="button"
-                  onClick={fetchVideo}
+                  onClick={fetchRelated}
                   className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-bold rounded-lg transition-colors border-none cursor-pointer"
                 >
                   Retry
