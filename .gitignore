@@ -12,3 +12,5 @@ dist
 .env
 backend/.env
 frontend/.env
+*-firebase-adminsdk-*.json
+cors.json

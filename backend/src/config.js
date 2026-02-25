@@ -47,21 +47,36 @@ function parseCorsOrigins() {
   return [...new Set(combined)];
 }
 
+function parseCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeBaseUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  return trimmed.replace(/\/+$/, '');
+}
+
 module.exports = {
   HOST: process.env.HOST || '0.0.0.0',
   PORT: Number(process.env.PORT) || 5000,
-  JWT_SECRET: process.env.JWT_SECRET || 'change-me-in-env',
-  JWT_EXPIRES_IN: '5m',
-  AUTH_TOKEN_EXPIRES_IN: process.env.AUTH_TOKEN_EXPIRES_IN || '12h',
-  ADMIN_OWNER_EMAIL: String(process.env.ADMIN_OWNER_EMAIL || 'msdharaniofficial@gmail.com').trim().toLowerCase(),
-  DEFAULT_ADMIN_EMAIL: process.env.ADMIN_EMAIL || 'admin@primeview.local',
-  DEFAULT_ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin123',
-  DEFAULT_USER_EMAIL: process.env.USER_EMAIL || 'user@primeview.local',
-  DEFAULT_USER_PASSWORD: process.env.USER_PASSWORD || 'user123',
-  SEED_DEFAULT_USERS: String(process.env.SEED_DEFAULT_USERS || '').trim().toLowerCase() === 'true',
   HLS_SEGMENT_SECONDS: Math.max(2, Math.min(12, Number(process.env.HLS_SEGMENT_SECONDS) || 6)),
   CORS_ORIGINS: parseCorsOrigins(),
-  STORAGE_DIR: path.resolve(ROOT_DIR, 'storage'),
   TMP_DIR: path.resolve(__dirname, '../tmp'),
-  DB_PATH: path.resolve(__dirname, '../data/videos.db')
+  WORK_DIR: path.resolve(__dirname, '../work'),
+  ADMIN_EMAILS: parseCsv(process.env.ADMIN_EMAILS || process.env.ADMIN_OWNER_EMAIL || 'msdharaniofficial@gmail.com'),
+  FIREBASE_DATABASE_URL: process.env.FIREBASE_DATABASE_URL || '',
+  FIREBASE_SERVICE_ACCOUNT_JSON: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+  FIREBASE_SERVICE_ACCOUNT_PATH: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
+  R2_ENDPOINT: process.env.R2_ENDPOINT || '',
+  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID || '',
+  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY || '',
+  R2_BUCKET: process.env.R2_BUCKET || '',
+  R2_REGION: process.env.R2_REGION || 'auto',
+  R2_PUBLIC_BASE_URL: normalizeBaseUrl(process.env.R2_PUBLIC_BASE_URL || ''),
+  R2_KEY_PREFIX: String(process.env.R2_KEY_PREFIX || 'videos').replace(/^\/+|\/+$/g, ''),
+  ROOT_DIR
 };

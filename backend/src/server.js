@@ -1,10 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const os = require('os');
-const { HOST, PORT, CORS_ORIGINS, STORAGE_DIR } = require('./config');
-const { tokenAuth } = require('./middleware/tokenAuth');
-const authRoutes = require('./routes/authRoutes');
+const { HOST, PORT, CORS_ORIGINS } = require('./config');
 const videoRoutes = require('./routes/videoRoutes');
 
 const app = express();
@@ -39,24 +36,11 @@ app.use(
 );
 app.use(express.json());
 
-function restrictStorageByToken(req, res, next) {
-  const relativePath = req.path.replace(/^\/+/, '');
-  const requestedVideoId = relativePath.split('/')[0];
-
-  if (!requestedVideoId || req.auth.videoId !== requestedVideoId) {
-    return res.status(403).json({ error: 'token does not match requested storage path' });
-  }
-
-  return next();
-}
-
 app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-app.use(authRoutes);
 app.use(videoRoutes);
-app.use('/storage', tokenAuth, restrictStorageByToken, express.static(path.resolve(STORAGE_DIR)));
 
 app.use((err, req, res, next) => {
   console.error(err);
